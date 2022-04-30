@@ -1,9 +1,11 @@
 const { Server } = require('ws');
 const fetch = require('node-fetch');
 const ms = require('ms');
+const prettyms = require('pretty-ms');
 const dayjs = require('dayjs');
+const { obfuscate } = require('javascript-obfuscator');
 
-const wss = new Server({ port: process.env.PORT || 8080 });
+const wss = new Server({ port: process.env.PORT || 8080 }); // IP will only work if t
 wss.users = {}; 
 wss.blacklist = [];
 
@@ -20,10 +22,11 @@ wss.on('connection', function(socket, request) {
         socket.close();
     };
 
-    socket.ip = req.headers['x-forwarded-for'] || 
-        req.connection.remoteAddress || 
-        req.socket.remoteAddress ||
-        req.connection.socket.remoteAddress;
+    socket.ip = request.headers['x-forwarded-for'] || 
+        request.connection.remoteAddress || 
+        request.socket.remoteAddress ||
+        request.connection.socket.remoteAddress;
+    socket.authorized = false;
 
     if (wss.blacklist.includes(socket.ip)) return socket.close();
 
@@ -75,9 +78,57 @@ wss.on('connection', function(socket, request) {
         }
 
         switch (data.header) {
+            case 'START_PROCESS': {
+                const randomInteger = (min, max) => { 
+                    let inBetween = (max - min) + 1; 
+                    let random = Math.floor(Math.random() * inBetween); 
+                    return max - random; // Returns max subtracted by random
+                };
+
+                const checks = ['constructor', 'window', 'document', 'document.body', 'document.head', 'document.createElement', 'navigator.userAgent.indexOf(\'HeadlessChrome\') != -1']; 
+                let integers = [];
+                
+                checks.forEach(_ => {
+                    integers.push(randomInteger(1, 1e10));
+                });
+
+                let evalStr = obfuscate(`let orgNum = 0;
+                if (constructor) orgNum += ${integers[0]};
+                if (window) orgNum += ${integers[1]};
+                if (document) orgNum += ${integers[2]};
+                if (document.body) orgNum += ${integers[3]};
+                if (document.head) orgNum += ${integers[4]};
+                if (document.createElement) orgNum += ${integers[5]}
+                if (!(navigator.userAgent.indexOf('HeadlessChrome') != -1)) orgNum += ${integers[6]}; orgNum;`, {
+                    compact: false,
+                    controlFlowFlattening: true,
+                    controlFlowFlatteningThreshold: 1,
+                    numbersToExpressions: true,
+                    simplify: true,
+                    shuffleStringArray: true,
+                    splitStrings: true,
+                    stringArrayThreshold: 1
+                }).getObfuscatedCode();
+                socket.challengeResult = integers.reduce((a, b) => a + b);
+                console.log(socket.challengeResult);
+
+                socket.send(JSON.stringify({ header: 'JS_CHALLENGE', data: { code: evalStr, } }));
+                break;
+            }
+            case 'JS_CHALLENGE_REPLY': {
+                const { result } = data.data;
+                if (socket.challengeResult != result) return socket.close();
+
+                socket.authorized = true;
+                socket.send(JSON.stringify({ header: 'PASSED', }));
+                break;
+            }
+        }
+
+        if (!socket.authorized) return;
+        switch (data.header) {
             case 'REGISTER': {
                 const { username, special } = data.data;
-                console.log(username);
                 if (typeof username != 'string') return socket.send(JSON.stringify({ header: 'REGISTER_REJECT', data: { message: 'Username must be of type String.', } }));
                 if (username.length > 15) return socket.send(JSON.stringify({ header: 'REGISTER_REJECT', data: { message: 'Username length cannot be greater than 15 characters.', } }));
 
@@ -104,10 +155,10 @@ wss.on('connection', function(socket, request) {
                     discriminator,
                     token,
                     status: 'Online',
-                    moderator: special == 'INSERT_SPECIAL_CODE_HERE',
+                    accessLevel: special == 'INSERT_MODERATOR_TOKEN' ? 1 : (special == 'INSERT_ADMINISTRATOR_TOKEN' ? 2 : 0),
                 };
 
-                socket.send(JSON.stringify({ header: 'REGISTER_ACCEPT', data: { message: `Registration was successful. ${wss.users[token].moderator ? 'You have received moderator permissions.' : ''}`, token, }}));
+                socket.send(JSON.stringify({ header: 'REGISTER_ACCEPT', data: { message: `Registration was successful. ${wss.users[token].accessLevel == 1 ? `You have received ${wss.users[token].accessLevel == 2 ? 'administrator' : 'moderator'} permissions.` : ''}`, token, }}));
                 break;
             }
             case 'AUTHORIZE': {
@@ -121,7 +172,7 @@ wss.on('connection', function(socket, request) {
             case 'SEND_MESSAGE': {
                 socket.data.messageCooldown++;
                 if (socket.data.messageCooldown >= 3) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: `You are being ratelimited. Please wait ${socket.data.messageCooldown} seconds to speak again.` } }));
-                if (socket.data.mute.muted) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: `You are still muted. Please wait ${ms(socket.data.mute.time, { long: true })} to speak again.`, } }));
+                if (socket.data.mute.muted) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: `You are still muted. Please wait ${prettyms(socket.data.mute.time, { verbose: true })} to speak again.`, } }));
 
                 const { message } = data.data;
                 if (typeof message != 'string') return socket.send(JSON.stringify({ header: 'REGISTER_REJECT', data: { message: 'Message must be of type String.', } }))
@@ -131,40 +182,39 @@ wss.on('connection', function(socket, request) {
                 });
 
                 if (message.length < 1 || message.length > 150) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: 'Character count must be within bounds 1-150.', } }));
-                if (message.startsWith('/') && socket.data.moderator) {
-                    const args = message.split(' '),
-                        cmd = args.shift().toLowerCase().replace('/', '');
-
-                    switch (cmd) {
-                        case 'mute': {
-                            const discriminator = args[0];
-                            console.log(discriminator);
-                            const user = Object.filter(wss.users, data => { return data.discriminator == discriminator });
-                            if (JSON.stringify(user) == '{}') return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: 'Failed to parse argument Discriminator: Could not find a user with specified discriminator.', } }));
-
-                            let time = args[1];
-                            if (!time) time = '10m';
-                            try { time = ms(time); } catch (er) { time = 10000; };
-
-                            console.log(Object.keys(user)[0]);
-                            wss.users[Object.keys(user)[0]].mute = {
-                                time,
-                                muted: true,
-                            };
-
-                            const target = [...wss.clients].filter(client => { return client.data?.discriminator == discriminator })[0];
-                            console.log(target);
-                            target?.send(JSON.stringify({ header: 'MODERATOR_ACTION', data: { message: `You have been muted for ${ms(time, { long: true })}.` }, }));
-                            wss.clients.forEach(client => client.send(JSON.stringify({ header: 'SYSTEM_MESSAGE', data: { message: `${target.data?.username}#${target.data?.discriminator} has been muted for ${ms(time, { long: true })}.`, } })));
-                        }
-                    }
-                }
 
                 wss.clients.forEach(client => client.send(JSON.stringify({ header: 'MESSAGE_ACCEPT', data: { 
                     message, 
                     author: `${socket.data.username}#${socket.data.discriminator}`, 
                     timestamp: dayjs().format('hh:mm:ss'),
                 }})));
+
+                if (message.startsWith('/') && socket.data.accessLevel) {
+                    const args = message.split(' '),
+                        cmd = args.shift().toLowerCase().replace('/', '');
+
+                    switch (cmd) {
+                        case 'mute': {
+                            const discriminator = args[0];
+                            const [ key, value ] = Object.entries(Object.filter(wss.users, data => { return data.discriminator == discriminator }))[0];
+                            if (!key || !value) return socket.send(JSON.stringify({ header: 'COMMAND_REJECT', data: { message: 'Failed to parse argument Discriminator: Could not find a user with specified discriminator.', } }));
+                            if (socket.data.accessLevel <= value.accessLevel) return socket.send(JSON.stringify({ header: 'COMMAND_REJECT', data: { message: 'Failed to execute command: Target has a higher or equal access level than you.', } }));
+
+                            let time = args[1];
+                            if (!time) time = '10m';
+                            try { time = ms(time); } catch (er) { time = 10000; };
+
+                            wss.users[key].mute = {
+                                time,
+                                muted: true,
+                            };
+
+                            const target = [...wss.clients].filter(client => { return client.data?.discriminator == discriminator })[0];
+                            target?.send(JSON.stringify({ header: 'MODERATOR_ACTION', data: { message: `You have been muted for ${prettyms(time, { verbose: true })}.` }, }));
+                            wss.clients.forEach(client => client.send(JSON.stringify({ header: 'SYSTEM_MESSAGE', data: { message: `${target.data?.username}#${target.data?.discriminator} has been muted for ${prettyms(time, { verbose: true })}.`, } })));
+                        }
+                    }
+                }
                 break;
             }
             case 'CHANGE_STATUS': {
@@ -187,7 +237,7 @@ wss.on('connection', function(socket, request) {
 
     socket.on('error', console.error);
     socket.on('close', function() {
-        socket?.data?.status = 'Offline';
+        if (socket.data) socket.data.status = 'Offline';
     });
 });
 

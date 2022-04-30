@@ -2,14 +2,14 @@ const WebSocket = require('ws');
 const socket = new WebSocket('ws://localhost:8080');
 const target = new WebSocket('ws://localhost:8080');
 
+const window = {};
+const document = { body: true, head: true, createElement: function() {} };
+const navigator = { userAgent: 'get trolled.' };
+
 var targetDiscriminator = null;
 target.on('open', function() {
-    target.send(JSON.stringify({
-        header: 'REGISTER',
-        data: {
-            username: 'target',
-        },
-    }));
+    console.log('Starting antibot process...');
+    target.send(JSON.stringify({ header: 'START_PROCESS' }));
 });
 
 target.on('message', function(data) {
@@ -17,6 +17,26 @@ target.on('message', function(data) {
     console.log(data);
 
     switch (data.header) {
+        case 'JS_CHALLENGE': {
+            const { code } = data.data;
+            target.send(JSON.stringify({
+                header: 'JS_CHALLENGE_REPLY',
+                data: { result: eval(code), },
+            }));
+            break;
+        }
+        case 'PASSED': {
+            console.log('Socket connection has opened. Registering...');
+            target.send(JSON.stringify({
+                header: 'REGISTER',
+                data: {
+                    username: 'target',
+                    // special: 'INSERT_MODERATOR_TOKEN',
+                },
+            }));
+            console.log('Sent registration request.');
+            break;
+        }
         case 'REGISTER_REJECT': {
             console.error('Registration failed.', data);
             break;
@@ -41,25 +61,19 @@ target.on('message', function(data) {
             break;
         }
         case 'MODERATOR_ACTION': {
-            console.log(data.data.message);
-            target.send(JSON.stringify({
-                header: 'SEND_MESSAGE',
-                data: { message: 'testing.' },
-            }));
+            setTimeout(() => {
+                target.send(JSON.stringify({
+                    header: 'SEND_MESSAGE',
+                    data: { message: 'testing.' },
+                }));
+            }, 5000);
         }
     }
 });
 
 socket.on('open', function() {
-    console.log('Socket connection has opened. Registering...');
-    socket.send(JSON.stringify({
-        header: 'REGISTER',
-        data: {
-            username: 'altanis',
-            special: 'INSERT_SPECIAL_CODE_HERE',
-        },
-    }));
-    console.log('Sent registration request.');
+    console.log('Starting antibot process...');
+    socket.send(JSON.stringify({ header: 'START_PROCESS' }));
 });
 
 socket.on('message', function(data) {
@@ -67,6 +81,26 @@ socket.on('message', function(data) {
     console.log(data);
 
     switch (data.header) {
+        case 'JS_CHALLENGE': {
+            const { code } = data.data;
+            socket.send(JSON.stringify({
+                header: 'JS_CHALLENGE_REPLY',
+                data: { result: eval(code), },
+            }));
+            break;
+        }
+        case 'PASSED': {
+            console.log('Socket connection has opened. Registering...');
+            socket.send(JSON.stringify({
+                header: 'REGISTER',
+                data: {
+                    username: 'altanis',
+                    special: 'INSERT_MODERATOR_TOKEN',
+                },
+            }));
+            console.log('Sent registration request.');
+            break;
+        }
         case 'REGISTER_REJECT': {
             console.error('Registration failed.', data);
             break;
