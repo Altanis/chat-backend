@@ -14,9 +14,8 @@ Object.filter = (obj, predicate) =>
 
 wss.on('connection', function(socket, request) {
     console.log('A new client has connected to the server.');
-    socket.blacklist = function() { console.log('IP ban should\'ve triggered.'); };
 
-    /*socket.blacklist = function() {
+    socket.blacklist = function() {
         wss.blacklist.push(socket.ip);
         socket.close();
     };
@@ -25,8 +24,8 @@ wss.on('connection', function(socket, request) {
         req.connection.remoteAddress || 
         req.socket.remoteAddress ||
         req.connection.socket.remoteAddress;
-    console.log(socket.ip);
-    if (wss.blacklist.includes(socket.ip)) return socket.close();*/
+
+    if (wss.blacklist.includes(socket.ip)) return socket.close();
 
     setInterval(() => {
         if (!socket.data) return;
@@ -47,9 +46,9 @@ wss.on('connection', function(socket, request) {
         !request.headers["accept-encoding"] ||
         !request.headers["accept-language"] ||
         !request.headers["sec-websocket-key"] ||
-        !request.headers["sec-websocket-extensions"]) socket.blacklist();
+        !request.headers["sec-websocket-extensions"]) return socket.blacklist();
     
-    /*fetch(`https://ipqualityscore.com/api/json/ip/ZwS61NRyh2WNRpZrzQLKmMYD5mxhyxUf/${socket.ip}`).then(r => r.json()).then(data => {
+    fetch(`https://ipqualityscore.com/api/json/ip/ZwS61NRyh2WNRpZrzQLKmMYD5mxhyxUf/${socket.ip}`).then(r => r.json()).then(data => {
         if (data.vpn ||
             data.tor ||
             data.active_vpn ||
@@ -65,14 +64,14 @@ wss.on('connection', function(socket, request) {
                     clearInterval(interval);
                 }, 150);
             }
-    });*/
+    });
 
     socket.on('message', function(data) {
         console.log(data);
         try {
             data = JSON.parse(data);
         } catch (error) {
-            socket.blacklist();
+            return socket.blacklist();
         }
 
         switch (data.header) {
