@@ -187,7 +187,7 @@ wss.on('connection', function(socket, request) {
 
     socket.on('error', console.error);
     socket.on('close', function() {
-        socket.data.status = 'Offline';
+        socket?.data?.status = 'Offline';
     });
 });
 
