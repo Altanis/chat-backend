@@ -42,7 +42,7 @@ wss.on('connection', function(socket, request) {
         }
     }, 1000);
 
-    /*if (!request.headers.upgrade ||
+    if (!request.headers.upgrade ||
         !request.headers.connection ||
         !request.headers.host ||
         !request.headers.pragma ||
@@ -52,9 +52,9 @@ wss.on('connection', function(socket, request) {
         !request.headers["accept-encoding"] ||
         !request.headers["accept-language"] ||
         !request.headers["sec-websocket-key"] ||
-        !request.headers["sec-websocket-extensions"]) return socket.blacklist();*/
+        !request.headers["sec-websocket-extensions"]) return socket.blacklist();
     
-    /*fetch(`https://ipqualityscore.com/api/json/ip/ZwS61NRyh2WNRpZrzQLKmMYD5mxhyxUf/${socket.ip}`).then(r => r.json()).then(data => {
+    fetch(`https://ipqualityscore.com/api/json/ip/ZwS61NRyh2WNRpZrzQLKmMYD5mxhyxUf/${socket.ip}`).then(r => r.json()).then(data => {
         if (data.vpn ||
             data.tor ||
             data.active_vpn ||
@@ -72,10 +72,13 @@ wss.on('connection', function(socket, request) {
             } else {
                 socket.authorizedLevel = 1;
             }
-    }).catch(er => console.error(`Could not detect whether or not IP is a proxy.`, er));*/
+    }).catch(er => {
+        console.error(`Could not detect whether or not IP is a proxy.`, er);
+        socket.authorizedLevel = 1;
+    });
 
     socket.on('message', function(data) {
-        if (!socket.authorizedLevel) return;
+        if (!socket.authorizedLevel) return socket.send(JSON.stringify({ header: 'PACKET_REJECT', data: { message: 'Please wait for our proxy detectors to finish scanning you.' } }));
         if (!data.includes('{')) return socket.blacklist();
 
         try {
