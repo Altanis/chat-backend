@@ -143,7 +143,7 @@ wss.on('connection', function(socket, request) {
                 if (!pass) return;
                 
 
-                const discriminator = Math.random().toString().substring(2).slice(0, 4);
+                const discriminator = Math.random().toString().substring(2);
                 const token = Buffer.from(`${username}#${discriminator} + ${Date.now()}`).toString('base64');
 
                 wss.users[token] = {
@@ -154,8 +154,12 @@ wss.on('connection', function(socket, request) {
                     username,
                     discriminator,
                     token,
-                    status: 'Online',
                     accessLevel: special == 'INSERT_MODERATOR_TOKEN' ? 1 : (special == 'INSERT_ADMINISTRATOR_TOKEN' ? 2 : 0),
+                    profile: {
+                        avatar: '',
+                        status: 'Offline',
+                        bio: '',
+                    },
                 };
 
                 socket.send(JSON.stringify({ header: 'REGISTER_ACCEPT', data: { message: `Registration was successful. ${wss.users[token].accessLevel == 1 ? `You have received ${wss.users[token].accessLevel == 2 ? 'administrator' : 'moderator'} permissions.` : ''}`, token, }}));
@@ -196,15 +200,15 @@ wss.on('connection', function(socket, request) {
                     switch (cmd) {
                         case 'mute': {
                             const discriminator = args[0];
-                            const [ key, value ] = Object.entries(Object.filter(wss.users, data => { return data.discriminator == discriminator }))[0];
-                            if (!key || !value) return socket.send(JSON.stringify({ header: 'COMMAND_REJECT', data: { message: 'Failed to parse argument Discriminator: Could not find a user with specified discriminator.', } }));
-                            if (socket.data.accessLevel <= value.accessLevel) return socket.send(JSON.stringify({ header: 'COMMAND_REJECT', data: { message: 'Failed to execute command: Target has a higher or equal access level than you.', } }));
+                            const [ token, data ] = Object.entries(Object.filter(wss.users, data => { return data.discriminator == discriminator }))[0];
+                            if (!token || !data) return socket.send(JSON.stringify({ header: 'COMMAND_REJECT', data: { message: 'Failed to parse argument Discriminator: Could not find a user with specified discriminator.', } }));
+                            if (socket.data.accessLevel <= data.accessLevel) return socket.send(JSON.stringify({ header: 'COMMAND_REJECT', data: { message: 'Failed to execute command: Target has a higher or equal access level than you.', } }));
 
                             let time = args[1];
                             if (!time) time = '10m';
                             try { time = ms(time); } catch (er) { time = 10000; };
 
-                            wss.users[key].mute = {
+                            wss.users[token].mute = {
                                 time,
                                 muted: true,
                             };
@@ -217,12 +221,37 @@ wss.on('connection', function(socket, request) {
                 }
                 break;
             }
-            case 'CHANGE_STATUS': {
-                const { status } = data.data;
-                if (!['Online', 'Idle', 'Do Not Disturb', 'Offline'].includes(status)) return socket.send(JSON.stringify({ header: 'STATUS_REJECT', data: { message: 'Invalid status was provided.' } }));
+            case 'UPDATE_PROFILE': {
+                Object.entries(data.data).forEach(([key, value]) => {
+                    if (!['status', 'avatar', 'bio'].includes(key)) return socket.send(JSON.stringify({ header: 'PROFILE_REJECT', data: { message: `Type ${key} is an invalid type to change in Profile.`, } }));
+                    if (key == 'status') {
+                        if (!['Offline', 'Do Not Disturb', 'Idle', 'Online'].includes(value)) return socket.send(JSON.stringify({ header: 'PROFILE_REJECT', data: { message: 'Invalid Status: Not one of the valid 4 types.' } }));
+                        socket.data.profile.status = value;
+                    } else if (key == 'avatar') {
+                        if (typeof value != 'string') return socket.send(JSON.stringify({ header: 'PROFILE_REJECT', data: { message: 'Invalid Avatar URL: Not of type String.', } }));
+                        if (value.match(/^http[^\?]*.(jpg|jpeg|png|tiff|bmp)(\?(.*))?$/gmi) == null) return socket.send(JSON.stringify({ header: 'PROFILE_REJECT', data: { message: 'Invalid Avatar URL: Not an image (JPG, PNG, TIFF, BMP).' } }));
 
-                socket.data.status = status;
-                socket.send(JSON.stringify({ header: 'STATUS_ACCEPT', data: { message: 'Status was changed successfully.' } }));
+                        socket.data.profile.avatar = value;
+                    } else if (key == 'bio') {
+                        if (typeof value != 'string') return socket.send(JSON.stringify({ header: 'PROFILE_REJECT', data: { message: 'Invalid Bio: Not of type String.', } }));
+                        if (value.length > 200 || value.length < 1) return socket.send({ header: 'PROFILE_REJECT', data: { message: 'Invalid Bio: Must be within bounds of 1-200.' } });
+
+                        socket.data.profile.bio = value;
+                    }
+
+                    socket.send(JSON.stringify({ header: 'PROFILE_ACCEPT', data: { message: `Updated your ${key} successfully!` } }));
+                });
+                break;
+            }
+            case 'REQUEST_PROFILE': {
+                const { discriminator } = data.data;
+                const [ token, data ] = Object.entries(Object.filter(wss.users, data => { return data.discriminator == discriminator }));
+                if (!token || !data) return socket.send(JSON.stringify({ header: 'REQUEST_REJECT', data: { message: 'Failed to parse argument Discriminator: Could not find a user with specified discriminator.', }  }));
+
+                const { username, profile } = data;
+                const { avatar, status, bio } = profile;
+
+                socket.send(JSON.stringify({ header: 'REQUEST_ACCEPT', data: { username, discriminator, avatar, status, bio } }));
                 break;
             }
             case 'PING': {
@@ -237,7 +266,7 @@ wss.on('connection', function(socket, request) {
 
     socket.on('error', console.error);
     socket.on('close', function() {
-        if (socket.data) socket.data.status = 'Offline';
+        if (socket.data) socket.data.profile.status = 'Offline';
     });
 });
 
