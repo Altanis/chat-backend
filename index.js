@@ -12,17 +12,18 @@ const wss = new Server({
 wss.users = {}; 
 wss.blacklist = new Set();
 
-Object.filter = (obj, predicate) => 
+Object.filter = (obj, predicate) => {
     Object.keys(obj)
-          .filter( key => predicate(obj[key]) )
-          .reduce( (res, key) => (res[key] = obj[key], res), {} );
+        .filter( key => predicate(obj[key]) )
+        .reduce( (res, key) => (res[key] = obj[key], res), {} );
+}
 
 wss.on('connection', function(socket, request) {
     console.log('A new client has connected to the server.');
 
     socket.blacklist = function() {
         wss.blacklist.add(socket.ip);
-        socket.close();
+        socket.terminate();
     };
 
     socket.ip = request.connection.remoteAddress || 
@@ -59,16 +60,11 @@ wss.on('connection', function(socket, request) {
             data.tor ||
             data.active_vpn ||
             data.active_tor) {
-                const interval = setInterval(() => {
-                    if (socket.readyState !== 1) return;
-                    
-                    socket.send(JSON.stringify({
-                        header: 'CONNECTION_CLOSE',
-                        data: { message: 'Our servers have detected you have a proxy enabled. Due to the prominence of botting, we do not allow proxies. Please disable it, and then reload.' },
-                    }));
-                    socket.close();
-                    clearInterval(interval);
-                }, 150);
+                socket.send(JSON.stringify({
+                    header: 'CONNECTION_CLOSE',
+                    data: { message: 'Our servers have detected you have a proxy enabled. Due to the prominence of botting, we do not allow proxies. Please disable it, and then reload.' },
+                }));
+                socket.close();
             } else {
                 socket.authorizedLevel = 1;
             }
