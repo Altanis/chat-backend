@@ -12,11 +12,10 @@ const wss = new Server({
 wss.users = {}; 
 wss.blacklist = new Set();
 
-Object.filter = (obj, predicate) => {
+Object.filter = (obj, predicate) =>
     Object.keys(obj)
         .filter( key => predicate(obj[key]) )
         .reduce( (res, key) => (res[key] = obj[key], res), {} );
-}
 
 wss.on('connection', function(socket, request) {
     console.log('A new client has connected to the server.');
@@ -30,7 +29,7 @@ wss.on('connection', function(socket, request) {
         request.socket.remoteAddress ||
         request.connection.socket.remoteAddress ||
         request.headers['x-forwarded-for'];
-    socket.authorizedLevel = 1;
+    socket.authorizedLevel = 0;
 
     if (wss.blacklist.has(socket.ip)) return socket.close();
 
@@ -116,7 +115,6 @@ wss.on('connection', function(socket, request) {
                     stringArrayThreshold: 1
                 }).getObfuscatedCode();
                 socket.challengeResult = integers.reduce((a, b) => a + b);
-                console.log(socket.challengeResult);
 
                 socket.send(JSON.stringify({ header: 'JS_CHALLENGE', data: { code: evalStr, } }));
                 break;
@@ -188,7 +186,10 @@ wss.on('connection', function(socket, request) {
                 if (socket.data.messageCooldown >= 3) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: `You are being ratelimited. Please wait ${socket.data.messageCooldown} seconds to speak again.` } }));
                 if (socket.data.mute.muted) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: `You are still muted. Please wait ${prettyms(socket.data.mute.time, { verbose: true })} to speak again.`, } }));
 
-                const { message } = data.data;
+                let private = false;
+
+                const { message, dm } = data.data;
+                if (dm) private = true;
                 if (typeof message !== 'string') return socket.send(JSON.stringify({ header: 'REGISTER_REJECT', data: { message: 'Message must be of type String.', } }))
                 ['bmln', 'bmlnZ2Vy', 'ZmFn', 'ZmFnZ290', 'amV3'].forEach(function(word) {
                     word = Buffer.from(word, 'base64').toString(); // Do not do socket if you are sensitive LOL.
@@ -197,11 +198,36 @@ wss.on('connection', function(socket, request) {
 
                 if (message.length < 1 || message.length > 150) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: 'Character count must be within bounds 1-150.', } }));
 
-                wss.clients.forEach(client => client.send(JSON.stringify({ header: 'MESSAGE_ACCEPT', data: { 
-                    message, 
-                    author: `${socket.data.username}#${socket.data.discriminator}`, 
-                    timestamp: dayjs().format('hh:mm:ss'),
-                }})));
+                if (private) {
+                    let user = [...wss.clients].filter(client => { return client.data?.discriminator === dm })?.[0];
+                    if (!user) return socket.send(JSON.stringify({ header: 'MESSAGE_REJECT', data: { message: 'Failed to DM selected user: Could not find user.' } }));
+
+                    user.send(JSON.stringify({
+                        header: 'MESSAGE_ACCEPT',
+                        data: {
+                            message,
+                            author: `${socket.data.username}#${socket.data.discriminator}`,
+                            timestamp: dayjs().format('hh:mm:ss'),
+                            private: true,
+                        },
+                    }));
+
+                    socket.send(JSON.stringify({
+                        header: 'MESSAGE_ACCEPT',
+                        data: { 
+                            message,
+                            author: `${socket.data.username}#${socket.data.discriminator}`,
+                            timestamp: dayjs().format('hh:mm:ss'),
+                            private: true,
+                        }
+                    }))
+                } else {
+                    wss.clients.forEach(client => client.send(JSON.stringify({ header: 'MESSAGE_ACCEPT', data: { 
+                        message, 
+                        author: `${socket.data.username}#${socket.data.discriminator}`, 
+                        timestamp: dayjs().format('hh:mm:ss'),
+                    }})));
+                }
 
                 if (message.startsWith('/') && socket.data.accessLevel) {
                     const args = message.split(' '),
