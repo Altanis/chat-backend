@@ -54,7 +54,7 @@ wss.on('connection', function(socket, request) {
         !request.headers["sec-websocket-key"] ||
         !request.headers["sec-websocket-extensions"]) return socket.blacklist();
     
-    fetch(`https://ipqualityscore.com/api/json/ip/ZwS61NRyh2WNRpZrzQLKmMYD5mxhyxUf/${socket.ip}`).then(r => r.json()).then(data => {
+    fetch(`https://ipqualityscore.com/api/json/ip/${process.env.TOKEN}/${socket.ip}`).then(r => r.json()).then(data => {
         if (data.vpn ||
             data.tor ||
             data.active_vpn ||
